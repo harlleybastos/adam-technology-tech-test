@@ -1,60 +1,30 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, User, Phone, Mail, Star } from "lucide-react";
+import { Calendar, Clock, Star, Mail } from "lucide-react";
 import { Booking } from "@/types";
-
-// Mock data - in real app this would come from API/database
-const mockBookings: Booking[] = [
-  {
-    id: "booking-1",
-    customerId: "customer-1",
-    painterId: "painter-1",
-    startTime: "2025-05-19T08:00:00Z",
-    endTime: "2025-05-19T12:00:00Z",
-    status: "confirmed",
-    notes: "Living room and bedroom painting",
-    painter: {
-      id: "painter-1",
-      name: "John Painter",
-      email: "john@painter.com",
-      experience: 5,
-      rating: 4.8,
-      specialties: ["Interior", "Exterior"],
-    },
-    customer: {
-      id: "customer-1",
-      name: "Sarah Johnson",
-      email: "sarah@email.com",
-      phone: "+1 (555) 123-4567",
-    },
-  },
-  {
-    id: "booking-2",
-    customerId: "customer-1",
-    painterId: "painter-2",
-    startTime: "2025-05-25T10:00:00Z",
-    endTime: "2025-05-25T16:00:00Z",
-    status: "confirmed",
-    notes: "Kitchen cabinet painting and touch-ups",
-    painter: {
-      id: "painter-2",
-      name: "Mike Brusher",
-      email: "mike@painter.com",
-      experience: 3,
-      rating: 4.6,
-      specialties: ["Interior", "Cabinet"],
-    },
-    customer: {
-      id: "customer-1",
-      name: "Sarah Johnson",
-      email: "sarah@email.com",
-      phone: "+1 (555) 123-4567",
-    },
-  },
-];
+import { useEffect, useState } from "react";
+import { bookingAPI } from "@/services/api";
 
 export const CustomerBookings = () => {
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setIsLoading(true);
+        const data = await bookingAPI.getMyBookings();
+        setBookings(data);
+      } catch (e: any) {
+        setError(e?.message || "Failed to load bookings");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, []);
   const formatDateTime = (dateTime: string) => {
     return new Date(dateTime).toLocaleString('en-US', {
       weekday: 'short',
@@ -89,7 +59,24 @@ export const CustomerBookings = () => {
     return new Date(dateTime) > new Date();
   };
 
-  if (mockBookings.length === 0) {
+  if (isLoading) {
+    return (
+      <div className="text-center py-12">
+        <Calendar className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+        <p className="text-muted-foreground">Loading bookings…</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-destructive">{error}</p>
+      </div>
+    );
+  }
+
+  if (bookings.length === 0) {
     return (
       <div className="text-center py-12">
         <Calendar className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
@@ -101,8 +88,8 @@ export const CustomerBookings = () => {
     );
   }
 
-  const upcomingBookings = mockBookings.filter(booking => isUpcoming(booking.startTime));
-  const pastBookings = mockBookings.filter(booking => !isUpcoming(booking.startTime));
+  const upcomingBookings = bookings.filter(booking => isUpcoming(booking.startTime));
+  const pastBookings = bookings.filter(booking => !isUpcoming(booking.startTime));
 
   return (
     <div className="space-y-6">

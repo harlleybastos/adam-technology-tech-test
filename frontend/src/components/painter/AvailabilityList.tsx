@@ -64,8 +64,12 @@ export const AvailabilityList = ({ refresh }: AvailabilityListProps) => {
   const formatDuration = (start: string, end: string) => {
     const startDate = new Date(start);
     const endDate = new Date(end);
-    const hours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-    return `${hours}h`;
+    const totalMinutes = Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60)));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+    if (hours > 0) return `${hours}h`;
+    return `${minutes}m`;
   };
 
   if (isLoading) {
