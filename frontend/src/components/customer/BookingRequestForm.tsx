@@ -35,6 +35,12 @@ const mockPainters: Painter[] = [
   },
 ];
 
+type AlternativeSlot = {
+  startTime: string;
+  endTime: string;
+  painter: { id: string; name: string; rating: number; experience: number; specialties: string[] };
+};
+
 export const BookingRequestForm = ({ onClose, onSuccess }: BookingRequestFormProps) => {
   const [startDate, setStartDate] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -44,7 +50,7 @@ export const BookingRequestForm = ({ onClose, onSuccess }: BookingRequestFormPro
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [assignedPainter, setAssignedPainter] = useState<Painter | null>(null);
   const [showResult, setShowResult] = useState(false);
-  const [alternativeSlots, setAlternativeSlots] = useState<string[]>([]);
+  const [alternativeSlots, setAlternativeSlots] = useState<AlternativeSlot[]>([]);
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -95,11 +101,7 @@ export const BookingRequestForm = ({ onClose, onSuccess }: BookingRequestFormPro
         });
       } else {
         // No availability - show alternatives if provided
-        setAlternativeSlots(response.alternatives || [
-          "Tomorrow at 2:00 PM - 6:00 PM",
-          "Day after tomorrow at 10:00 AM - 2:00 PM", 
-          "This weekend at 9:00 AM - 1:00 PM",
-        ]);
+        setAlternativeSlots(response.alternatives || []);
         toast({
           title: "No Available Painters",
           description: response.error || "We found some alternative time slots for you.",
@@ -114,6 +116,37 @@ export const BookingRequestForm = ({ onClose, onSuccess }: BookingRequestFormPro
         description: error instanceof Error ? error.message : "Failed to create booking request",
         variant: "destructive",
       });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const formatAlt = (iso: string) => new Date(iso).toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  const bookAlternative = async (alt: AlternativeSlot) => {
+    try {
+      setIsSubmitting(true);
+      const response = await bookingAPI.request({ startTime: alt.startTime, endTime: alt.endTime, notes });
+      if (response.success && response.data) {
+        setAssignedPainter(response.data.painter);
+        toast({
+          title: "Booked Alternative Slot",
+          description: `Assigned to ${response.data.painter.name}`,
+        });
+      } else {
+        setAssignedPainter(null);
+        setAlternativeSlots(response.alternatives || []);
+        toast({ title: "Still Unavailable", description: response.error || "Try another suggested slot.", variant: "destructive" });
+      }
+      setShowResult(true);
+    } catch (error) {
+      toast({ title: "Error", description: error instanceof Error ? error.message : "Failed booking alternative", variant: "destructive" });
     } finally {
       setIsSubmitting(false);
     }
@@ -195,10 +228,16 @@ export const BookingRequestForm = ({ onClose, onSuccess }: BookingRequestFormPro
               <div className="bg-muted rounded-lg p-4">
                 <h4 className="font-medium mb-3">🏅 Recommended Alternative Slots</h4>
                 <div className="space-y-2">
+                  {alternativeSlots.length === 0 && (
+                    <p className="text-sm text-muted-foreground">No alternatives at the moment. Try a different time range.</p>
+                  )}
                   {alternativeSlots.map((slot, index) => (
                     <div key={index} className="flex items-center justify-between p-2 bg-background rounded border">
-                      <span className="text-sm">{slot}</span>
-                      <Button size="sm" variant="outline">Select</Button>
+                      <div className="text-sm">
+                        <div className="font-medium">{formatAlt(slot.startTime)} - {formatAlt(slot.endTime)}</div>
+                        <div className="text-muted-foreground">Suggested painter: {slot.painter.name} (★ {slot.painter.rating}, {slot.painter.experience}y)</div>
+                      </div>
+                      <Button size="sm" variant="outline" disabled={isSubmitting} onClick={() => bookAlternative(slot)}>Select</Button>
                     </div>
                   ))}
                 </div>

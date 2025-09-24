@@ -16,6 +16,68 @@ type AvailabilityWithPainter = {
   };
 };
 
+export class NoAvailabilityError extends Error {
+  alternatives: Array<{
+    startTime: string;
+    endTime: string;
+    painter: { id: string; name: string; rating: number; experience: number; specialties: string[] };
+  }>;
+  code: string;
+  constructor(message: string, alternatives: NoAvailabilityError['alternatives']) {
+    super(message);
+    this.name = 'NoAvailabilityError';
+    this.code = 'NO_AVAILABILITY';
+    this.alternatives = alternatives;
+  }
+}
+
+function computePainterScore(input: { rating: number; experience: number; workload: number }) {
+  const ratingNorm = Math.max(0, Math.min(1, input.rating / 5));
+  const experienceNorm = Math.max(0, Math.min(1, input.experience / 10));
+  const workloadNorm = 1 - Math.max(0, Math.min(1, input.workload / 10));
+  return ratingNorm * 0.5 + experienceNorm * 0.3 + workloadNorm * 0.2;
+}
+
+async function findClosestAlternatives(start: Date, end: Date): Promise<NoAvailabilityError['alternatives']> {
+  const beforeWindow = new Date(start.getTime() - 1000 * 60 * 60 * 24 * 3); // 3 days before
+  const afterWindow = new Date(end.getTime() + 1000 * 60 * 60 * 24 * 7); // 7 days after
+
+  const nearbySlots = await prisma.availability.findMany({
+    where: {
+      isBooked: false,
+      OR: [
+        { startTime: { gte: beforeWindow, lte: afterWindow } },
+        { endTime: { gte: beforeWindow, lte: afterWindow } },
+      ],
+    },
+    include: { painter: true },
+    orderBy: { startTime: 'asc' },
+    take: 25,
+  });
+
+  const withDistance = nearbySlots.map((slot) => {
+    let distanceMs = 0;
+    if (slot.endTime < start) distanceMs = start.getTime() - slot.endTime.getTime();
+    else if (slot.startTime > end) distanceMs = slot.startTime.getTime() - end.getTime();
+    else distanceMs = 0; // overlaps partially
+    return { slot, distanceMs };
+  });
+
+  withDistance.sort((a, b) => a.distanceMs - b.distanceMs);
+
+  return withDistance.slice(0, 5).map(({ slot }) => ({
+    startTime: slot.startTime.toISOString(),
+    endTime: slot.endTime.toISOString(),
+    painter: {
+      id: slot.painter.id,
+      name: slot.painter.name,
+      rating: Number(slot.painter.rating),
+      experience: slot.painter.experience,
+      specialties: slot.painter.specialties,
+    },
+  }));
+}
+
 export async function requestBooking(user: JwtUser, params: { startTime: string; endTime: string; notes?: string }) {
   if (user.role !== 'customer') throw new Error('Only customers can request bookings');
   const customer = await prisma.customer.findFirst({ where: { userId: user.id } });
@@ -35,24 +97,26 @@ export async function requestBooking(user: JwtUser, params: { startTime: string;
   });
 
   if (availableSlots.length === 0) {
-    throw new Error('No painters are available for the requested time slot.');
+    const alternatives = await findClosestAlternatives(start, end);
+    throw new NoAvailabilityError('No painters are available for the requested time slot.', alternatives);
   }
 
   // Simple scoring placeholder based on rating, experience, and workload
-  const paintersWithWorkload: Array<{ slot: AvailabilityWithPainter; workload: number }> = await Promise.all(
+  const paintersWithWorkload: Array<{ slot: AvailabilityWithPainter; workload: number; score: number }> = await Promise.all(
     availableSlots.map(async (slot: AvailabilityWithPainter) => {
       const workload = await prisma.booking.count({
         where: { painterId: slot.painterId, status: { in: ['confirmed', 'pending'] } },
       });
-      return { slot, workload };
+      const score = computePainterScore({
+        rating: Number(slot.painter.rating),
+        experience: slot.painter.experience,
+        workload,
+      });
+      return { slot, workload, score };
     })
   );
 
-  paintersWithWorkload.sort((a, b) => {
-    const aScore = Number(a.slot.painter.rating) * 0.6 - a.workload * 0.4;
-    const bScore = Number(b.slot.painter.rating) * 0.6 - b.workload * 0.4;
-    return bScore - aScore;
-  });
+  paintersWithWorkload.sort((a, b) => b.score - a.score);
 
   const chosen = paintersWithWorkload[0].slot;
 
